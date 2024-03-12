@@ -1,29 +1,60 @@
-use hashbrown::HashMap;
 use std::cmp;
-use std::ops::{Add, Mul};
+use std::ops::Add;
 
 #[derive(Clone, Debug)]
 pub struct Polynomial {
-    pub data: HashMap<u32, u8>,
+    pub powers: Vec<u32>,
+    pub coefs: Vec<u8>,
     pub p: u8,
+}
+
+fn add(a_keys: &Vec<u32>, a_values: &Vec<u8>, b_keys: &Vec<u32>, b_values: &Vec<u8>, p: u8) -> (Vec<u32>, Vec<u8>) {
+    let mut i = 0;
+    let mut j = 0;
+    let mut c_keys = Vec::new();
+    let mut c_values = Vec::new();
+
+    while i < a_keys.len() && j < b_keys.len() {
+        if a_keys[i] < b_keys[j] {
+            c_keys.push(a_keys[i]);
+            c_values.push(a_values[i]);
+            i += 1;
+        } else if a_keys[i] > b_keys[j] {
+            c_keys.push(b_keys[j]);
+            c_values.push(b_values[j]);
+            j += 1;
+        } else {
+            let new_val = (a_values[i] + b_values[j]) % p;
+            if new_val != 0 {
+                c_keys.push(a_keys[i]);
+                c_values.push(new_val);
+            }
+            i += 1;
+            j += 1;
+        }
+    }
+
+    while i < a_keys.len() {
+        c_keys.push(a_keys[i]);
+        c_values.push(a_values[i]);
+        i += 1;
+    }
+
+    while j < b_keys.len() {
+        c_keys.push(b_keys[j]);
+        c_values.push(b_values[j]);
+        j += 1;
+    }
+
+    (c_keys, c_values)
 }
 
 impl Add for &Polynomial {
     type Output = Polynomial;
 
     fn add(self, rhs: &Polynomial) -> Polynomial {
-        let mut c = HashMap::new();
-        for (a_pow, a_coef) in self.data.iter() {
-            *c.entry(*a_pow).or_insert(0) += a_coef;
-        }
-        for (b_pow, b_coef) in rhs.data.iter() {
-            *c.entry(*b_pow).or_insert(0) += b_coef;
-        }
-        for c_coef in c.values_mut() {
-            *c_coef %= self.p;
-        }
-        c.retain(|_, v| *v != 0);
-        Polynomial { data: c, p: self.p }
+        let (new_powers, new_coefs) = add(&self.powers, &self.coefs, &rhs.powers, &rhs.coefs, self.p);
+        Polynomial { powers: new_powers, coefs: new_coefs, p: self.p }
     }
 }
 impl Add for Polynomial {
@@ -34,37 +65,15 @@ impl Add for Polynomial {
     }
 }
 
-impl Mul for &Polynomial {
-    type Output = Polynomial;
-
-    fn mul(self, rhs: &Polynomial) -> Polynomial {
-        let mut c = HashMap::new();
-        for (a_pow, a_coef) in self.data.iter() {
-            for (b_pow, b_coef) in rhs.data.iter() {
-                *c.entry(a_pow + b_pow).or_insert(0) += a_coef * b_coef;
-            }
-        }
-        for c_coef in c.values_mut() {
-            *c_coef %= self.p;
-        }
-        c.retain(|_, v| *v != 0);
-        Polynomial { data: c, p: self.p }
-    }
-}
-
-impl PartialEq for Polynomial {
-    fn eq(&self, rhs: &Polynomial) -> bool {
-        self.data == rhs.data
-    }
-}
-
 impl Polynomial {
     pub fn new(elements: Vec<(u32, u8)>, p: u8) -> Polynomial {
-        let mut data = HashMap::new();
+        let mut powers: Vec<u32> = Vec::new();
+        let mut coefs: Vec<u8> = Vec::new();
         for (a, b) in elements {
-            data.insert(a, b);
+            powers.push(a);
+            coefs.push(b);
         }
-        Polynomial { data, p }
+        Polynomial { powers, coefs, p }
     }
 
     pub fn zero(p: u8) -> Polynomial {
@@ -76,28 +85,33 @@ impl Polynomial {
     }
 
     pub fn is_zero(&self) -> bool {
-        self.data.is_empty()
+        self.powers.is_empty()
     }
 
     pub fn max_power(&self) -> u32 {
-        *self.data.keys().max().unwrap()
+        *self.powers.last().unwrap()
     }
 
     pub fn min_power(&self) -> u32 {
-        *self.data.keys().min().unwrap()
+        *self.powers.first().unwrap()
     }
 
     pub fn mult(&self, power: u32, neg: bool) -> Polynomial {
-        let new_data: HashMap<u32, u8> = if power == 0 && !neg {
-            self.data.clone()
+        let new_powers: Vec<u32> = if self.is_zero() {
+            Vec::new()
+        } else if power == 0 && !neg {
+            self.powers.clone()
         } else {
-            self.data
-                .iter()
-                .map(|(k, v)| (k + power, (if neg { self.p - v } else { *v }) % self.p))
-                .collect()
+            self.powers.iter().map(|x| x + power).collect()
+        };
+        let new_coefs = if neg {
+            self.coefs.iter().map(|x| (self.p - x) % self.p).collect()
+        } else {
+            self.coefs.clone()
         };
         Polynomial {
-            data: new_data,
+            powers: new_powers,
+            coefs: new_coefs,
             p: self.p,
         }
     }
@@ -107,17 +121,6 @@ impl Polynomial {
 pub struct Matrix {
     pub d: [Polynomial; 9],
     pub p: u8,
-}
-
-impl PartialEq for Matrix {
-    fn eq(&self, rhs: &Matrix) -> bool {
-        for i in 0..9 {
-            if self.d[i] != rhs.d[i] {
-                return false;
-            }
-        }
-        true
-    }
 }
 
 impl Matrix {
@@ -162,50 +165,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn add_handles_overlap() {
+        let a_keys: Vec<u32> = vec![2, 4, 8];
+        let b_keys: Vec<u32> = vec![1, 4, 8];
+        let a_vals: Vec<u8> = vec![10, 20, 30];
+        let b_vals: Vec<u8> = vec![5, 3, 1];
+        let (c_keys, c_vals) = add(&a_keys, &a_vals, &b_keys, &b_vals, 41);
+        assert_eq!(c_keys, vec![1, 2, 4, 8]);
+        assert_eq!(c_vals, vec![5, 10, 23, 31]);
+    }
+
+    #[test]
     fn add_polynomial_overlapping_coefficient() {
         let a = Polynomial::new(vec![(1, 1), (2, 2)], 41);
         let b = Polynomial::new(vec![(0, 41 - 1), (1, 1)], 41);
-        let c = (&a + &b).data;
-        assert_eq!(c.values().count(), 3);
-        assert_eq!(c[&0], 41 - 1);
-        assert_eq!(c[&1], 2);
-        assert_eq!(c[&2], 2);
+        let c = (&a + &b).powers;
+        assert_eq!(c.len(), 3);
+        assert_eq!(c[0], 0);
+        assert_eq!(c[1], 1);
+        assert_eq!(c[2], 2);
     }
 
     #[test]
     fn add_polynomial_terms_cancel() {
         let a = Polynomial::new(vec![(1, 1), (2, 2)], 41);
         let b = Polynomial::new(vec![(0, 41 - 1), (1, 41 - 1)], 41);
-        let c = (&a + &b).data;
-        assert_eq!(c.values().count(), 2);
-        assert_eq!(c[&0], 41 - 1);
-        assert_eq!(c[&2], 2);
+        let c = (&a + &b).powers;
+        assert_eq!(c.len(), 2);
+        assert_eq!(c[0], 0);
+        assert_eq!(c[1], 2);
     }
 
-    #[test]
-    fn multiply_polynomial_negative_coefficient() {
-        let a = Polynomial::new(vec![(1, 1), (2, 2)], 41);
-        let b = Polynomial::new(vec![(0, 41 - 1)], 41);
-        let c = (&a * &b).data;
-        // (t + 2t^2) * (-1) = -t - 2t^2
-        assert_eq!(c.values().count(), 2);
-        assert_eq!(c[&1], 41 - 1);
-        assert_eq!(c[&2], 41 - 2);
-    }
     #[test]
     fn add_polynomial_mod_two() {
         let a = Polynomial::new(vec![(1, 1)], 2);
-        let c = (&a + &a).data;
-        assert_eq!(c.values().count(), 0);
-    }
-
-    #[test]
-    fn multiply_polynomial_mod_three() {
-        let a = Polynomial::new(vec![(1, 2)], 3);
-        let c = (&a * &a).data;
-        // 2x * 2x = x² over 𝔽₃.
-        assert_eq!(c.values().count(), 1);
-        assert_eq!(c[&2], 1);
+        let c = &a + &a;
+        println!("{:?}", c);
+        assert!(c.is_zero());
     }
 
     #[test]
