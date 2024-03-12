@@ -29,13 +29,10 @@ fn main() {
         p, seed, beam_width
     );
 
-    let matrix_map = generate_matrix_map(p);
-
     let mut states: HashMap<u32, Vec<State>> = HashMap::new();
 
     for factor in 1..23 {
-        let matrix = matrix_map[&factor].clone();
-        let state = State::new(factor, matrix);
+        let state = State::new(factor, p);
         let these_states = states.entry(state.projlen()).or_default();
         these_states.push(state);
     }
@@ -43,10 +40,10 @@ fn main() {
     search_best_first_parallel(states, 16, p);
 }
 
-fn evaluate_candidate(candidate: State, p: u8) -> u32 {
+/* fn evaluate_candidate(candidate: &State, p: u8) -> u32 {
     let descendants = generate_descendants();
     let depth = 4;
-    let mut layer: Vec<State> = vec![candidate.clone()];
+    let mut layer: Vec<State> = vec![*candidate];
     let mut best_projlen = u32::MAX;
     for layer_num in 0..depth {
         let mut new_layer: Vec<State> = Vec::new();
@@ -69,30 +66,31 @@ fn evaluate_candidate(candidate: State, p: u8) -> u32 {
 }
 
 fn lookahead_search(p: u8, seed: u64) {
-    let matrix_map = generate_matrix_map(p);
     let descendants = generate_descendants();
-    let mut candidates: Vec<State> = Vec::new();
+    let mut candidates: Vec<&State> = Vec::new();
     let mut rng = Pcg32::seed_from_u64(seed);
     for factor in 1..23 {
-        let matrix = matrix_map[&factor].clone();
-        let state = State::new(factor, matrix);
-        candidates.push(state);
+        let state = State::new(factor, p);
+        candidates.push(&state);
     }
     loop {
-        let evaluations: Vec<u32> = candidates
-            .clone()
+        let evaluations: Vec<u32> = {
+            candidates
             .into_par_iter()
             .map(|candidate| evaluate_candidate(candidate, p))
-            .collect();
+            .collect()
+        };
         let mut best_eval = u32::MAX;
         let mut best_eval_index = 0;
         let mut seen_with_best = 0;
-        for (i, eval) in evaluations.iter().enumerate() {
-            if eval < &best_eval {
-                best_eval = *eval;
+        let mut best_candidate: Option<&State> = None;
+        for (i, eval) in evaluations.iter().zip(candidates).enumerate() {
+            if eval.0 < &best_eval {
+                best_eval = *eval.0;
                 best_eval_index = i;
                 seen_with_best = 1;
-            } else if eval == &best_eval {
+                best_candidate = Some(eval.1);
+            } else if eval.0 == &best_eval {
                 seen_with_best += 1;
                 if rng.gen_range(0..seen_with_best) == 0 {
                     best_eval_index = i;
@@ -103,18 +101,18 @@ fn lookahead_search(p: u8, seed: u64) {
             println!("DONE");
             return;
         }
-        let best_candidate = candidates.get(best_eval_index).unwrap().clone();
         let mut new_candidates: Vec<State> = Vec::new();
-        let last_factor = best_candidate.factor;
+        let last_factor = best_candidate.unwrap().factor;
         assert_eq!(best_eval, *evaluations.iter().min().unwrap());
-        println!("Selected candidate with projlen {}, factor {}. Best seen is {}, index {}, best eval {}", best_candidate.projlen(), best_candidate.factor, best_eval, best_eval_index, evaluations.iter().min().unwrap());
+        candidates.clear();
+        //println!("Selected candidate with projlen {}, factor {}. Best seen is {}, index {}, best eval {}", best_candidate.projlen(), best_candidate.factor, best_eval, best_eval_index, evaluations.iter().min().unwrap());
         for descendant in &descendants[&last_factor] {
-            let new_state = best_candidate.append(*descendant, p);
+            let new_state = best_candidate.unwrap().append(*descendant, p);
             new_candidates.push(new_state);
         }
-        candidates = new_candidates;
+        candidates = new_candidates.iter().map(|x| x).collect();
     }
-}
+} */
 
 fn run_to_fixed_limited(states: &[State], p: u8) -> (bool, HashMap<u32, Vec<State>>) {
     let descendants = generate_descendants();
@@ -209,10 +207,7 @@ fn search_best_first_parallel(mut states: HashMap<u32, Vec<State>>, num_threads:
                     } else {
                         result_states.len()
                     };
-                    states
-                        .entry(*projlen)
-                        .or_default()
-                        .extend_from_slice(&result_states[..should_add]);
+                    states.entry(*projlen).or_default().extend(result_states.drain(..should_add));
                     total_states += should_add;
                 } else {
                     states.entry(*projlen).or_default().append(result_states);
@@ -244,7 +239,7 @@ fn beam_search_parallel(mut states: HashMap<u32, Vec<State>>, num_threads: usize
             if have_added + to_add > todo {
                 to_add = todo - have_added;
             }
-            let states_to_add = &mut these_states[..to_add].to_vec();
+            let states_to_add = &mut these_states[..to_add];
 
             let chunks: Vec<&[State]> = states_to_add.chunks(num_threads).collect();
             let results: Vec<(bool, HashMap<u32, Vec<State>>)> = chunks
@@ -454,7 +449,6 @@ fn search_best_first_reservoir(mut states: HashMap<u32, Vec<State>>, seed: u64, 
     }
 }
 
-#[derive(Clone)]
 pub struct State {
     // pub factors: Vec<i32>,
     pub factor: u32,
@@ -462,8 +456,13 @@ pub struct State {
 }
 
 impl State {
-    pub fn new<'a>(factor: u32, mat: Matrix) -> State {
-        State { factor, mat }
+    pub fn new(factor: u32, p: u8) -> State {
+        let eye = Matrix::identity(p);
+        let mat: Matrix = act_by(&eye, factor, p);
+        State {
+            factor,
+            mat
+        }
     }
 
     pub fn projlen(&self) -> u32 {
