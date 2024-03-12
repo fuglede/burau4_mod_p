@@ -4,7 +4,7 @@ use std::ops::{Add, Mul};
 
 #[derive(Clone, Debug)]
 pub struct Polynomial {
-    pub data: Vec<(u32, u8)>,
+    pub data: Vec<(u16, u8)>,
     pub p: u8,
 }
 
@@ -78,7 +78,7 @@ impl PartialEq for Polynomial {
 }
 
 impl Polynomial {
-    pub fn new(elements: Vec<(u32, u8)>, p: u8) -> Polynomial {
+    pub fn new(elements: Vec<(u16, u8)>, p: u8) -> Polynomial {
         Polynomial { data: elements, p }
     }
 
@@ -94,16 +94,16 @@ impl Polynomial {
         self.data.is_empty()
     }
 
-    pub fn max_power(&self) -> u32 {
+    pub fn max_power(&self) -> u16 {
         self.data.last().unwrap().0
     }
 
-    pub fn min_power(&self) -> u32 {
+    pub fn min_power(&self) -> u16 {
         self.data.first().unwrap().0
     }
 
-    pub fn mult(&self, power: u32, neg: bool) -> Polynomial {
-        let new_data: Vec<(u32, u8)> = if power == 0 && !neg {
+    pub fn mult(&self, power: u16, neg: bool) -> Polynomial {
+        let new_data: Vec<(u16, u8)> = if power == 0 && !neg {
             self.data.clone()
         } else {
             self.data
@@ -160,15 +160,15 @@ impl Matrix {
     }
 
     pub fn projlen(&self) -> u32 {
-        let mut min_power: u32 = u32::MAX;
-        let mut max_power: u32 = u32::MIN;
+        let mut min_power: u16 = u16::MAX;
+        let mut max_power: u16 = u16::MIN;
         for i in 0..9 {
             if !&self.d[i].is_zero() {
                 min_power = cmp::min(min_power, (&self.d[i]).min_power());
                 max_power = cmp::max(max_power, (&self.d[i]).max_power());
             }
         }
-        return max_power - min_power + 1;
+        return (max_power - min_power + 1).into();
     }
 }
 
