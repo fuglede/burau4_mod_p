@@ -42,13 +42,13 @@ fn main() {
 
 /* fn evaluate_candidate(candidate: &State, p: u8) -> u32 {
     let descendants = generate_descendants();
-    let depth = 4;
-    let mut layer: Vec<State> = vec![*candidate];
+    let depth = 2;
     let mut best_projlen = u32::MAX;
+    let mut layer: Vec<State> = vec![candidate.clone()];
     for layer_num in 0..depth {
         let mut new_layer: Vec<State> = Vec::new();
         for test_state in layer {
-            let last_factor = test_state.factor;
+            let last_factor = test_state.factors.last().unwrap();
             for descendant in &descendants[&last_factor] {
                 let new_state = test_state.append(*descendant, p);
                 if layer_num == depth - 1 {
@@ -65,70 +65,92 @@ fn main() {
     best_projlen
 }
 
+fn evaluate_candidate_mc(candidate: &State, p: u8, seed: u64) -> u32 {
+    let descendants = generate_descendants();
+    let depth = 1;
+
+    let mut rng: rand_pcg::Lcg64Xsh32 = Pcg32::seed_from_u64(seed);
+    let mut best_projlen = u32::MAX;
+    let sample_count = 1000;
+    for _ in 0..sample_count {
+        let mut next_candidate = candidate.clone();
+        for _ in 0..depth {
+            let last_factor = next_candidate.factors.last().unwrap();
+            let desc = &descendants[last_factor];
+            let index = rng.gen_range(0..desc.len()-1);
+            let chosen_desc = desc[index];
+            next_candidate = next_candidate.append(chosen_desc, p)
+        }
+        if next_candidate.projlen() < best_projlen {
+            best_projlen = next_candidate.projlen()
+        }
+    }
+    best_projlen
+}
+
+fn evaluate_candidates(states: &[State], p: u8) -> Vec<u32> {
+    states.iter().map(|state| evaluate_candidate(state, p)).collect()
+}
+
 fn lookahead_search(p: u8, seed: u64) {
     let descendants = generate_descendants();
-    let mut candidates: Vec<&State> = Vec::new();
-    let mut rng = Pcg32::seed_from_u64(seed);
+    let mut candidates: Vec<State> = Vec::new();
     for factor in 1..23 {
         let state = State::new(factor, p);
-        candidates.push(&state);
+        candidates.push(state);
     }
+    let mut layer = 1;  
+    let mut rng: rand_pcg::Lcg64Xsh32 = Pcg32::seed_from_u64(seed);
+    let candidates_to_choose: usize = 15000;
     loop {
+        let chunks: Vec<&[State]> = candidates.chunks(16).collect();
         let evaluations: Vec<u32> = {
-            candidates
+            chunks
             .into_par_iter()
-            .map(|candidate| evaluate_candidate(candidate, p))
+            .map(|candidates| evaluate_candidates(candidates, p))
+            .flatten()
             .collect()
         };
-        let mut best_eval = u32::MAX;
-        let mut best_eval_index = 0;
-        let mut seen_with_best = 0;
-        let mut best_candidate: Option<&State> = None;
-        for (i, eval) in evaluations.iter().zip(candidates).enumerate() {
-            if eval.0 < &best_eval {
-                best_eval = *eval.0;
-                best_eval_index = i;
-                seen_with_best = 1;
-                best_candidate = Some(eval.1);
-            } else if eval.0 == &best_eval {
-                seen_with_best += 1;
-                if rng.gen_range(0..seen_with_best) == 0 {
-                    best_eval_index = i;
-                }
-            }
-        }
-        if best_eval == 1 {
-            println!("DONE");
+
+        let mut all_evals: Vec<(&u32, State)> = evaluations.iter().zip(candidates).collect();
+        all_evals.sort_by_key(|(eval, state)| *eval);
+        if all_evals.first().unwrap().1.is_goal() {
+            println!("{:?}", all_evals.first().unwrap().1.factors);
             return;
         }
+        println!("Layer {}. Selected candidate with projlen {}. Best seen is {}.", layer, all_evals.first().unwrap().1.projlen(), all_evals.first().unwrap().0);
+        layer += 1;
         let mut new_candidates: Vec<State> = Vec::new();
-        let last_factor = best_candidate.unwrap().factor;
-        assert_eq!(best_eval, *evaluations.iter().min().unwrap());
-        candidates.clear();
-        //println!("Selected candidate with projlen {}, factor {}. Best seen is {}, index {}, best eval {}", best_candidate.projlen(), best_candidate.factor, best_eval, best_eval_index, evaluations.iter().min().unwrap());
-        for descendant in &descendants[&last_factor] {
-            let new_state = best_candidate.unwrap().append(*descendant, p);
-            new_candidates.push(new_state);
+        let candidates_to_keep = if candidates_to_choose > evaluations.len() { evaluations.len() } else { candidates_to_choose };
+        for (_, best_candidate) in all_evals.drain(..candidates_to_keep) {
+            let last_factor = best_candidate.factors.last().unwrap();
+            for descendant in &descendants[last_factor] {
+                let new_state = best_candidate.append(*descendant, p);
+                new_candidates.push(new_state);
+            }
+
         }
-        candidates = new_candidates.iter().map(|x| x).collect();
+        let rot = rng.gen_range(0..new_candidates.len());
+        new_candidates.rotate_left(rot);
+        candidates = new_candidates;
     }
-} */
+}
 
 fn run_to_fixed_limited(states: &[State], p: u8) -> (bool, HashMap<u32, Vec<State>>) {
     let descendants = generate_descendants();
     let mut result: HashMap<u32, Vec<State>> = HashMap::new();
     for state in states {
-        let last_factor = state.factor; //s.last().unwrap();
+        let last_factor = state.factors.last().unwrap();
 
-        for descendant in &descendants[&last_factor] {
+        for descendant in &descendants[last_factor] {
             let new_state = state.append(*descendant, p);
-            let this_projlen = new_state.projlen();
-
-            if this_projlen == 1 {
+            if new_state.is_goal() {
                 //println!("Found kernel element. Garside generators:");
-                println!("{:?}", new_state.factor);
+                println!("{:?}", new_state.factors);
                 return (true, result);
             }
+            let this_projlen = new_state.projlen();
+
             let states_with_projlen = result.entry(this_projlen).or_default();
             states_with_projlen.push(new_state);
         }

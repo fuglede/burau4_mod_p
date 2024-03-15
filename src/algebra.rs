@@ -1,7 +1,7 @@
 use std::cmp;
 use std::ops::Add;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Polynomial {
     pub powers: Vec<u32>,
     pub coefs: Vec<u8>,
@@ -117,7 +117,7 @@ impl Polynomial {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Matrix {
     pub d: [Polynomial; 9],
     pub p: u8,
