@@ -99,7 +99,7 @@ impl Polynomial {
     pub fn mult(&self, power: u32, neg: bool) -> Polynomial {
         let new_powers: Vec<u32> = if self.is_zero() {
             Vec::new()
-        } else if power == 0 && !neg {
+        } else if power == 0 {
             self.powers.clone()
         } else {
             self.powers.iter().map(|x| x + power).collect()
