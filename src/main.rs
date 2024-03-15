@@ -176,7 +176,7 @@ fn search_best_first_parallel(mut states: HashMap<u32, Vec<State>>, num_threads:
             let mut to_add = these_states.len();
             if have_added + to_add > todo {
                 to_add = todo - have_added;
-                println!("Draining {} from {}", i, to_add);
+                //println!("Draining {} from {}", i, to_add);
                 these_states.drain(to_add..);
                 if these_states.is_empty() {
                     states.remove(&i);
@@ -326,15 +326,15 @@ fn beam_search(mut states: HashMap<u32, Vec<State>>, seed: u64, beam_width: u64,
         let mut seen_num_by_projlen: HashMap<u32, u32> = HashMap::new();
 
         for state in states.values().flatten() {
-            let last_factor = state.factor; //;s.last().unwrap();
+            let last_factor = state.factors.last().unwrap();
 
-            for descendant in &descendants[&last_factor] {
+            for descendant in &descendants[last_factor] {
                 let new_state = state.append(*descendant, p);
                 let this_projlen = new_state.projlen();
 
                 if this_projlen == 1 {
                     println!("Found kernel element. Garside generators:");
-                    println!("{:?}", new_state.factor);
+                    println!("{:?}", new_state.factors);
                     return;
                 }
                 if this_projlen > highest && total_kept >= beam_width {
@@ -386,14 +386,13 @@ fn beam_search(mut states: HashMap<u32, Vec<State>>, seed: u64, beam_width: u64,
     }
 }
 
-fn search_best_first_limited_search(mut states: HashMap<u32, Vec<State>>, seed: u64, p: u8) {
+fn search_best_first_limited_width(mut states: HashMap<u32, Vec<State>>, p: u8) {
     let descendants = generate_descendants();
     let mut lowest = *states.keys().min().unwrap();
     let mut highest = *states.keys().max().unwrap();
     let mut total_kept: usize = states.values().map(|x| x.len()).sum();
     let mut highest_seen_projlen = u32::MIN;
-    let mut rng = Pcg32::seed_from_u64(seed);
-    const MAX_KEEP: usize = 1000000;
+    const MAX_KEEP: usize = 60000;
 
     loop {
         let these_states = states.get_mut(&lowest).unwrap();
@@ -409,15 +408,15 @@ fn search_best_first_limited_search(mut states: HashMap<u32, Vec<State>>, seed: 
             }
         }
 
-        let last_factor = state.factor; //s.last().unwrap();
+        let last_factor = state.factors.last().unwrap();
 
-        for descendant in &descendants[&last_factor] {
+        for descendant in &descendants[last_factor] {
             let new_state = state.append(*descendant, p);
             let this_projlen = new_state.projlen();
 
             if this_projlen == 1 {
                 println!("Found kernel element. Garside generators:");
-                println!("{:?}", new_state.factor);
+                println!("{:?}", new_state.factors);
                 return;
             }
             if this_projlen > highest && total_kept >= MAX_KEEP {
@@ -439,7 +438,6 @@ fn search_best_first_limited_search(mut states: HashMap<u32, Vec<State>>, seed: 
                 highest_states.pop();
                 total_kept -= 1;
                 if highest_states.is_empty() {
-                    //println!("removing {} (highest)", highest);
                     states.remove(&highest);
                     highest = *states.keys().max().unwrap();
                 }
@@ -466,16 +464,16 @@ fn search_best_first_reservoir(mut states: HashMap<u32, Vec<State>>, seed: u64, 
             }
         }
 
-        let last_factor = state.factor; //s.last().unwrap();
+        let last_factor = state.factors.last().unwrap();
 
-        for descendant in &descendants[&last_factor] {
+        for descendant in &descendants[last_factor] {
             let new_state = state.append(*descendant, p);
             let this_projlen = new_state.projlen();
             *num_seen_by_projlen.entry(this_projlen).or_default() += 1;
 
             if this_projlen == 1 {
                 println!("Found kernel element. Garside generators:");
-                println!("{:?}", new_state.factor);
+                println!("{:?}", new_state.factors);
                 return;
             }
             let states_with_projlen = states.entry(this_projlen).or_default();
@@ -497,9 +495,9 @@ fn search_best_first_reservoir(mut states: HashMap<u32, Vec<State>>, seed: u64, 
     }
 }
 
+#[derive(Clone)]
 pub struct State {
-    // pub factors: Vec<i32>,
-    pub factor: u32,
+    pub factors: Vec<u32>,
     pub mat: Matrix,
 }
 
@@ -507,22 +505,27 @@ impl State {
     pub fn new(factor: u32, p: u8) -> State {
         let eye = Matrix::identity(p);
         let mat: Matrix = act_by(&eye, factor, p);
+        let projlen = mat.projlen();
         State {
-            factor,
-            mat
+            factors: vec![factor],
+            mat,
         }
     }
 
     pub fn projlen(&self) -> u32 {
-        self.mat.projlen()
+        return self.mat.projlen();
+    }
+
+    pub fn is_goal(&self) -> bool {
+        self.projlen() == 1
     }
 
     pub fn append(&self, factor: u32, p: u8) -> State {
-        //let mut factors = self.factors.clone();
-        //factors.push(factor);
+        let mut factors = self.factors.clone();
+        factors.push(factor);
         let new_matrix: Matrix = act_by(&self.mat, factor, p);
         State {
-            factor,
+            factors,
             mat: new_matrix,
         }
     }
