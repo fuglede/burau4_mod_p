@@ -244,42 +244,68 @@ fn search_best_first_parallel(mut states: HashMap<u32, Vec<State>>, num_threads:
 }
 
 fn beam_search_parallel(mut states: HashMap<u32, Vec<State>>, num_threads: usize, p: u8) {
-    let todo: usize = 7000;
+    let to_handle_per_layer: usize = 8000;
     let mut layer: i32 = 0;
     loop {
         // Split out
         let mut current_projlens: Vec<u32> = states.keys().into_iter().map(|x| *x).collect();
         current_projlens.sort();
-        let mut have_added: usize = 0;
+        let mut have_handled: usize = 0;
         let mut collected: HashMap<u32, Vec<State>> = HashMap::new();
         println!("Layer {}. Truncated elements:", layer);
         layer += 1;
 
         for i in current_projlens {
+            let mut have_added = 0;
+
+            let mut highest_relevant_projlen = u32::MAX;
             let these_states = states.get_mut(&i).unwrap();
-            let mut to_add = these_states.len();
-            if have_added + to_add > todo {
-                to_add = todo - have_added;
+            let mut to_handle = these_states.len();
+            if have_handled + to_handle > to_handle_per_layer {
+                to_handle = to_handle_per_layer - have_handled;
             }
-            let states_to_add = &mut these_states[..to_add];
+            let states_to_add = &mut these_states[..to_handle];
 
             let chunks: Vec<&[State]> = states_to_add.chunks(num_threads).collect();
             let results: Vec<(bool, HashMap<u32, Vec<State>>)> = chunks
                 .into_par_iter()
                 .map(|chunk| run_to_fixed_limited(chunk, p))
                 .collect();
+
             for mut result in results {
                 if result.0 {
                     return;
                 }
                 for (projlen, result_states) in result.1.iter_mut() {
+                    if *projlen >= highest_relevant_projlen {
+                        continue;
+                    }
+                    have_added += result_states.len();
                     collected.entry(*projlen).or_default().append(result_states);
+                    if have_added >= to_handle_per_layer {
+                        let mut all_keys: Vec<u32> = collected.keys().into_iter().map(|x| *x).collect();
+                        all_keys.sort();
+                        let mut count_by_layer = 0;
+                        let mut hit_highest_relevant = false;
+                        for key in all_keys {
+                            if hit_highest_relevant {
+                                collected.remove(&key);
+                            } else {
+                                count_by_layer += collected.get(&key).unwrap().len();
+                                
+                                if count_by_layer >= to_handle_per_layer {
+                                    highest_relevant_projlen = key;
+                                    hit_highest_relevant = true;
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            have_added += to_add;
-            println!("{}: {}", i, to_add);
-            if have_added == todo {
+            have_handled += to_handle;
+            println!("{}: {}", i, to_handle);
+            if have_handled == to_handle_per_layer {
                 break;
             }
         }
