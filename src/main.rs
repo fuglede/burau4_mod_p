@@ -40,7 +40,7 @@ fn main() {
     search_best_first_parallel(states, 16, p);
 }
 
-/* fn evaluate_candidate(candidate: &State, p: u8) -> u32 {
+ fn evaluate_candidate(candidate: &State, p: u8) -> u32 {
     let descendants = generate_descendants();
     let depth = 2;
     let mut best_projlen = u32::MAX;
@@ -49,7 +49,7 @@ fn main() {
         let mut new_layer: Vec<State> = Vec::new();
         for test_state in layer {
             let last_factor = test_state.factors.last().unwrap();
-            for descendant in &descendants[&last_factor] {
+            for descendant in &descendants[last_factor] {
                 let new_state = test_state.append(*descendant, p);
                 if layer_num == depth - 1 {
                     let this_projlen = new_state.projlen();
